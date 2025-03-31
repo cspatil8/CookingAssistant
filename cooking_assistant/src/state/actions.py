@@ -1,0 +1,10 @@
+# Define action types for ReduxPY
+
+class General:
+    INIT_RECIPE = 'INIT_RECIPE'
+    ADD_USER_MESSAGE = 'ADD_USER_MESSAGE'
+    ADD_ASSISTANT_MESSAGE = 'ADD_ASSISTANT_MESSAGE'
+
+class Tools:
+    SET_TIMER = 'SET_TIMER'
+    TIMER_EXPIRED = 'TIMER_EXPIRED'
