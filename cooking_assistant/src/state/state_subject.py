@@ -40,7 +40,7 @@ def print_state(state: Dict[str, Any]):
     try:
         with open('state_log.jsonl', 'a') as f:
             # Convert state to JSON string, handling potential non-serializable types gracefully
-            log_entry = json.dumps(new_state, default=str) 
+            log_entry = json.dumps(state, default=str) 
             f.write(log_entry + '\n')
     except Exception as e:
         print(f"Error writing state to log file: {e}") # Basic error handling
