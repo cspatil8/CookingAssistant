@@ -25,13 +25,20 @@ SYSTEM_PROMPT_RECIPE = (
 )
 
 SYSTEM_PROMPT_GENERAL = (
-    "You are a helpful cooking assistant. "
+    "You are a helpful cooking assistant. Your goal is to guide the user through their cooking process. "
+    "Refer to the provided message history, including the current recipe state if available. "
     "If you mention a specific duration for a cooking step (e.g., 'boil for 10 minutes', 'let rest for 5 minutes'), "
     "you MUST also include a timer marker in your response. "
     "Use the exact format [TIMER: <duration_in_seconds> <unique_timer_id>]. "
     "Replace <duration_in_seconds> with the total number of seconds, and <unique_timer_id> "
     "with a short, descriptive ID for the timer (use underscores instead of spaces, e.g., 'pasta_boiling'). "
-    "Only include this marker if a specific duration is mentioned for an action."
+    "Only include this timer marker if a specific duration is mentioned for an action. "
+    "Additionally, based on the conversation history and the user's last message, determine if the user is implicitly or explicitly moving to the next step of the recipe/process. "
+    "If you conclude they are moving to a new step, you MUST include a step marker in your response. "
+    "Use the exact format [STEP: <step_index>]. "
+    "Replace <step_index> with the zero-based index of the new step the user is now on. "
+    "For example, if the user was on step 0 and asks 'what's next?', your response might guide them on step 1 and include '[STEP: 1]'. "
+    "Only include the [STEP: <step_index>] marker if you determine the user is transitioning to a new step. Do not include it otherwise." 
 )
 
 class AzureOpenAIProvider:
@@ -72,6 +79,7 @@ class AzureOpenAIProvider:
                 response = self.client.beta.chat.completions.parse(
                     model=self.deployment_name, # Use instance variable for deployment name
                     messages=[
+                        # SYSTEM_PROMPT_RECIPE is mainly for the structure, not conversational step tracking
                         {"role": "system", "content": SYSTEM_PROMPT_RECIPE},
                         {"role": "user", "content": prompt}
                     ],
@@ -83,13 +91,21 @@ class AzureOpenAIProvider:
                 # is often directly available or within response.choices[0].message.tool_calls or similar.
                 # However, the most reliable way specified by Azure docs sometimes is still
                 # getting the content and parsing. Let's assume content holds the JSON string.
-                recipe_json_string = response.choices[0].message.content
-                if recipe_json_string:
-                    parsed_recipe = Recipe.model_validate_json(recipe_json_string)
-                    return parsed_recipe
+                
+                # Adjusting based on potential new API behavior for 'parse'
+                # The .parse() method might directly return the Pydantic object.
+                if isinstance(response, Recipe):
+                    return response
+                elif hasattr(response, 'choices') and response.choices: # Check if it's the older structure
+                    recipe_json_string = response.choices[0].message.content
+                    if recipe_json_string:
+                        parsed_recipe = Recipe.model_validate_json(recipe_json_string)
+                        return parsed_recipe
+                    else:
+                        raise ValueError("LLM response content is empty or not in expected format for Recipe.")
                 else:
-                    # Handle cases where content might be empty or response structure is unexpected
-                    raise ValueError("LLM response content is empty or not in expected format for Recipe.")
+                    # Handle unexpected response structure from .parse()
+                    raise ValueError(f"Unexpected response structure from LLM parse method: {type(response)}")
 
             else:
                 # Handle general prompts returning strings
