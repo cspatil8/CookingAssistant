@@ -31,7 +31,14 @@ SYSTEM_PROMPT_GENERAL = (
     "Use the exact format [TIMER: <duration_in_seconds> <unique_timer_id>]. "
     "Replace <duration_in_seconds> with the total number of seconds, and <unique_timer_id> "
     "with a short, descriptive ID for the timer (use underscores instead of spaces, e.g., 'pasta_boiling'). "
-    "Only include this marker if a specific duration is mentioned for an action."
+    "Only include this marker if a specific duration is mentioned for an action.\n\n"
+    "Additionally, you should keep track of the user's progress through the recipe. "
+    "If your conversation with the user indicates they have completed the current step and are moving to the next step, "
+    "you MUST include a step update marker at the end of your response in this format: "
+    "[STEP_UPDATE: <step_number>] where <step_number> is the NEW step number they should proceed to (1-indexed). "
+    "For example, if the user completes step 2 and should move to step 3, include [STEP_UPDATE: 3]. "
+    "Only include this marker when the user is ready to move to a new step, or if they explicitly "
+    "indicate they want to go back to a previous step."
 )
 
 class AzureOpenAIProvider:

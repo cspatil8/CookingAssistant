@@ -61,9 +61,9 @@ def main():
     recipe_input_subject = Subject()
     user_input_subject = Subject()
     timer_event_subject = Subject()
-
+    step_event_subject = Subject()
     conversation_response_stream = create_conversation_stream(
-        recipe_input_subject, user_input_subject, timer_event_subject
+        recipe_input_subject, user_input_subject, timer_event_subject, step_event_subject
     )
 
     conversation_response_stream.subscribe(

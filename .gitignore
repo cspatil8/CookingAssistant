@@ -135,3 +135,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw? # Vim swap files
+
+# Application specific files
+state_log.jsonl

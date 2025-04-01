@@ -8,3 +8,4 @@ class General:
 class Tools:
     SET_TIMER = 'SET_TIMER'
     TIMER_EXPIRED = 'TIMER_EXPIRED'
+    UPDATE_STEP = 'UPDATE_STEP'

@@ -8,7 +8,7 @@ from ..llm.azure_openai_provider import openai_provider, Recipe
 from ..state.state_subject import get_state, update_state
 from ..state import actions
 from ..timers.timer_manager import set_timer
-from ..utils.response_parser import parse_and_trigger_timers
+from ..utils.response_parser import parse_and_trigger_all_markers
 
 def build_prompt_from_state(state: Dict[str, Any]) -> str:
     """
@@ -24,7 +24,7 @@ def build_prompt_from_state(state: Dict[str, Any]) -> str:
     message_history = "\n".join(f"{msg['role']}: {msg['text']}" for msg in state['messages'])
     return message_history + step_info
 
-def process_event(event: Dict[str, Any], timer_event_subject: Subject):
+def process_event(event: Dict[str, Any], timer_event_subject: Subject, step_event_subject: Subject):
     """
     Process an event, potentially call LLM, parse response for timers, and update state.
     
@@ -85,6 +85,14 @@ def process_event(event: Dict[str, Any], timer_event_subject: Subject):
         update_state(updater)
         # No LLM call needed for timer expiration
         # Optional: Could trigger an LLM call here to ask "What's next?"
+        
+    elif event_type == actions.Tools.UPDATE_STEP:
+        step_number = event['payload']['step_number']
+        def updater(state):
+            state['current_step'] = step_number
+            return state
+        update_state(updater)
+        # No LLM call needed for step update as this is just updating internal state
 
     if should_call_llm:
         current_state = get_state()
@@ -118,10 +126,12 @@ def process_event(event: Dict[str, Any], timer_event_subject: Subject):
                 return rx.of(error_msg)
 
         elif isinstance(llm_response_raw, str):
-            llm_response_cleaned = parse_and_trigger_timers(
+            # Use the new comprehensive parser function that handles both timers and step updates
+            llm_response_cleaned = parse_and_trigger_all_markers(
                 llm_response_raw,
                 set_timer,
-                timer_event_subject
+                timer_event_subject,
+                step_event_subject
             )
             
             def add_assistant_msg_updater(state):
@@ -144,7 +154,8 @@ def process_event(event: Dict[str, Any], timer_event_subject: Subject):
 
 def create_conversation_stream(recipe_input_subject: Subject,
                                user_input_subject: Subject,
-                               timer_event_subject: Subject):
+                               timer_event_subject: Subject,
+                               step_event_subject: Subject):
     """
     Merge multiple event sources, process them (now passing timer_event_subject), 
     and apply switch_latest.
@@ -152,10 +163,11 @@ def create_conversation_stream(recipe_input_subject: Subject,
     conversation_event_stream = rx.merge(
         recipe_input_subject,
         user_input_subject,
-        timer_event_subject
+        timer_event_subject,
+        step_event_subject
     )
     conversation_response_stream = conversation_event_stream.pipe(
-        ops.map(lambda event: process_event(event, timer_event_subject)), 
+        ops.map(lambda event: process_event(event, timer_event_subject, step_event_subject)), 
         ops.switch_latest()
     )
     return conversation_response_stream

@@ -32,6 +32,8 @@ def update_state(updater: Callable[[Dict[str, Any]], Dict[str, Any]]) -> Dict[st
     current_state = get_state()
     new_state = updater(current_state)
 
+    print_state(new_state)
+
     conversation_state_subject.on_next(new_state)
     return new_state
 
