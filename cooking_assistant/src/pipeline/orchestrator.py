@@ -2,6 +2,7 @@ import reactivex as rx
 import reactivex.operators as ops
 from typing import Dict, Any
 from reactivex.subject import Subject
+import json
 
 from ..llm.azure_openai_provider import openai_provider, Recipe
 from ..state.state_subject import get_state, update_state
@@ -19,8 +20,9 @@ def build_prompt_from_state(state: Dict[str, Any]) -> str:
     Returns:
         A prompt string.
     """
-    foo = "\n".join(f"{msg['role']}: {msg['text']}" for msg in state['messages'])
-    return foo
+    step_info = f"\nCurrent Step: {state.get('current_step', 'Not started')}"
+    message_history = "\n".join(f"{msg['role']}: {msg['text']}" for msg in state['messages'])
+    return message_history + step_info
 
 def process_event(event: Dict[str, Any], timer_event_subject: Subject):
     """
@@ -35,17 +37,23 @@ def process_event(event: Dict[str, Any], timer_event_subject: Subject):
     """
     event_type = event.get('type')
     should_call_llm = False
+    llm_response_format = None
+    prompt_override = None
     
     if event_type == actions.General.INIT_RECIPE:
-        def updater(state):
+        recipe_name_request = event['payload']['recipe_name']
+        prompt_override = f"Provide the recipe for {recipe_name_request}"
+        llm_response_format = Recipe
+        
+        def initial_updater(state):
             return {
-                'recipe': event['payload']['recipe_name'],
+                'recipe': None,
                 'current_step': 0,
-                'messages': [{'role': 'system', 'text': f"Recipe initialized: {event['payload']['recipe_name']}"}],
+                'messages': [{'role': 'system', 'text': f"Loading recipe for {recipe_name_request}..."}],
                 'timers': {}
             }
-        update_state(updater)
-        should_call_llm = True # Call LLM after initializing recipe
+        update_state(initial_updater)
+        should_call_llm = True
     
     elif event_type == actions.General.ADD_USER_MESSAGE:
         def updater(state):
@@ -53,7 +61,8 @@ def process_event(event: Dict[str, Any], timer_event_subject: Subject):
             state['messages'] = new_messages
             return state
         update_state(updater)
-        should_call_llm = True # Call LLM after user message
+        should_call_llm = True
+        llm_response_format = None
     
     elif event_type == actions.Tools.SET_TIMER:
         # This case might be redundant if timers are only set via LLM parsing
@@ -78,33 +87,59 @@ def process_event(event: Dict[str, Any], timer_event_subject: Subject):
         # Optional: Could trigger an LLM call here to ask "What's next?"
 
     if should_call_llm:
-        # Build prompt from the potentially updated state
-        prompt = build_prompt_from_state(get_state())
+        current_state = get_state()
+        prompt = prompt_override if prompt_override else build_prompt_from_state(current_state)
         
-        # Call LLM (this is blocking for now, consider async/await or Rx improvements later)
         llm_response_raw = openai_provider.send_prompt(
-            prompt, 
-            response_format="recipe" if event_type == actions.General.INIT_RECIPE else None
+            prompt,
+            response_format=llm_response_format
         )
-        
-        # Parse the response for timers and trigger them
-        llm_response_cleaned = parse_and_trigger_timers(
-            llm_response_raw,
-            set_timer,           # Pass the actual set_timer function
-            timer_event_subject  # Pass the subject instance
-        )
-        
-        # Update state with the cleaned assistant message
-        def add_assistant_msg_updater(state):
-            new_messages = state['messages'] + [{'role': 'assistant', 'text': llm_response_cleaned}]
-            state['messages'] = new_messages
-            return state
-        update_state(add_assistant_msg_updater)
-        
-        # Return the cleaned response in an observable
-        return rx.of(llm_response_cleaned)
+
+        if event_type == actions.General.INIT_RECIPE:
+            if isinstance(llm_response_raw, Recipe):
+                recipe_obj = llm_response_raw
+                def update_recipe_and_message(state):
+                    state['recipe'] = recipe_obj.model_dump()
+                    state['messages'] = [{
+                        'role': 'system',
+                        'text': f"The current recipe is:\n{json.dumps(recipe_obj.model_dump(), indent=2)}"
+                    }]
+                    return state
+                update_state(update_recipe_and_message)
+                
+                confirmation_msg = f"Recipe '{recipe_obj.recipe_name}' loaded."
+                return rx.of(confirmation_msg)
+            else:
+                error_msg = f"Error: Failed to load recipe. Response: {llm_response_raw}"
+                def add_error_msg_updater(state):
+                     state['messages'] = state['messages'] + [{'role': 'system', 'text': error_msg}]
+                     return state
+                update_state(add_error_msg_updater)
+                return rx.of(error_msg)
+
+        elif isinstance(llm_response_raw, str):
+            llm_response_cleaned = parse_and_trigger_timers(
+                llm_response_raw,
+                set_timer,
+                timer_event_subject
+            )
+            
+            def add_assistant_msg_updater(state):
+                new_messages = state['messages'] + [{'role': 'assistant', 'text': llm_response_cleaned}]
+                state['messages'] = new_messages
+                return state
+            update_state(add_assistant_msg_updater)
+            
+            return rx.of(llm_response_cleaned)
+        else:
+            error_msg = f"Error: Unexpected response type from LLM: {type(llm_response_raw)}"
+            def add_error_msg_updater(state):
+                 state['messages'] = state['messages'] + [{'role': 'system', 'text': error_msg}]
+                 return state
+            update_state(add_error_msg_updater)
+            return rx.of(error_msg)
+
     else:
-        # If no LLM call was made, return an empty observable
         return rx.empty()
 
 def create_conversation_stream(recipe_input_subject: Subject,
@@ -117,10 +152,9 @@ def create_conversation_stream(recipe_input_subject: Subject,
     conversation_event_stream = rx.merge(
         recipe_input_subject,
         user_input_subject,
-        timer_event_subject # Timer events trigger state updates but not usually LLM calls directly
+        timer_event_subject
     )
     conversation_response_stream = conversation_event_stream.pipe(
-        # Pass timer_event_subject to process_event
         ops.map(lambda event: process_event(event, timer_event_subject)), 
         ops.switch_latest()
     )

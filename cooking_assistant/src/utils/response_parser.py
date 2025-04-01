@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Define the timer marker pattern: [TIMER: <duration_seconds> <timer_id>]
 # - <duration_seconds>: Integer
 # - <timer_id>: String without spaces (use underscores)
-TIMER_PATTERN = re.compile(r"\[TIMER:\s*(\d+)\s+([a-zA-Z0-9_]+)\s*\]")
+TIMER_PATTERN = re.compile(r'\[TIMER:\s*(\d+)\s+([^\]]+)\]')
 
 def parse_and_trigger_timers(
     response_text: str,
@@ -28,11 +28,14 @@ def parse_and_trigger_timers(
     Returns:
         The response text with the timer markers removed.
     """
-    matches = TIMER_PATTERN.finditer(response_text)
+    matches_iterator = TIMER_PATTERN.finditer(response_text)
+    # Convert the iterator to a list ONCE and store it
+    match_list = list(matches_iterator)
+    
     processed_text = response_text
     offset = 0 # Keep track of index changes due to replacements
 
-    for match in matches:
+    for match in match_list:
         try:
             duration_str = match.group(1)
             timer_id = match.group(2)
@@ -57,7 +60,6 @@ def parse_and_trigger_timers(
             logging.error(f"Invalid duration found in timer marker: {match.group(0)}. Skipping.")
         except Exception as e:
             logging.error(f"Error processing timer marker {match.group(0)}: {e}")
-
     return processed_text
 
 # Example Usage (conceptual - needs integration into your main app flow)
